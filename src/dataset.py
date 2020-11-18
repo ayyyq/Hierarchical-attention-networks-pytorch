@@ -66,21 +66,21 @@ class MyDataset(Dataset):
         label = self.labels[index]  # scalar
         doc = self.texts[index]  # doc, list of list
         id = self.ids[index]
-        masks = []
+        mask = []
 
         for sent in doc:
-            mask = [1] * len(sent) + [0] * (self.max_seq_len - len(sent))
-            masks.append(mask)
+            tmp_mask = [1] * len(sent) + [0] * (self.max_seq_len - len(sent))
+            mask.append(tmp_mask)
             if len(sent) < self.max_seq_len:
                 sent += [0] * (self.max_seq_len - len(sent))
         if len(doc) < self.max_seq_num:
-            masks += [[0] * self.max_seq_len] * (self.max_seq_num - len(doc))
+            mask += [[0] * self.max_seq_len] * (self.max_seq_num - len(doc))
             doc += [[0] * self.max_seq_len] * (self.max_seq_num - len(doc))
         elif len(doc) > self.max_seq_num:
-            masks = masks[:self.max_seq_num]
+            mask = mask[:self.max_seq_num]
             doc = doc[:self.max_seq_num]
 
-        return torch.tensor(doc), torch.tensor(masks), torch.tensor(label, dtype=torch.long), id
+        return torch.tensor(doc), torch.tensor(mask), torch.tensor(label, dtype=torch.long), id
 
 
 if __name__ == '__main__':

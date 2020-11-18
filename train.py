@@ -5,9 +5,10 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from src.utils import get_max_lengths, get_evaluation
+from src.utils import get_max_lengths, get_evaluation, k_fold_split
 from src.dataset import MyDataset
 from src.hierarchical_att_model import HierAttNet
+from src.model import BertHierAttNet
 from tensorboardX import SummaryWriter
 import argparse
 import shutil
@@ -16,21 +17,25 @@ import numpy as np
 
 def get_args():
     parser = argparse.ArgumentParser(
-        """Implementation of the model described in the paper: Hierarchical Attention Networks for Document Classification""")
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--num_epoches", type=int, default=100)
-    parser.add_argument("--lr", type=float, default=0.1)
+        """Hierarchical Attention Networks for Document-level Event Factuality Prediction""")
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--num_epoches", type=int, default=50)
+    parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--momentum", type=float, default=0.9)
-    parser.add_argument("--word_hidden_size", type=int, default=50)
-    parser.add_argument("--sent_hidden_size", type=int, default=50)
+
+    parser.add_argument("--bert_size", type=int, default=768)
+    parser.add_argument("--word_hidden_size", type=int, default=100)
+    parser.add_argument("--sent_hidden_size", type=int, default=100)
+
     parser.add_argument("--es_min_delta", type=float, default=0.0,
                         help="Early stopping's parameter: minimum change loss to qualify as an improvement")
-    parser.add_argument("--es_patience", type=int, default=5,
+    parser.add_argument("--es_patience", type=int, default=0,
                         help="Early stopping's parameter: number of epochs with no improvement after which training will be stopped. Set to 0 to disable this technique.")
-    parser.add_argument("--train_set", type=str, default="ag_news_csv/train.csv")
-    parser.add_argument("--test_set", type=str, default="ag_news_csv/test.csv")
+
+    parser.add_argument("--data_set", type=str, default="data/dlef_corpus/english.xml")
     parser.add_argument("--test_interval", type=int, default=1, help="Number of epoches between testing phases")
-    parser.add_argument("--word2vec_path", type=str, default="glove.6B.50d.txt")
+    parser.add_argument("--bert_path", type=str, default="data/bert-base-uncased")
+    parser.add_argument("--word2vec_path", type=str, default="data/glove.6B.50d.txt")
     parser.add_argument("--log_path", type=str, default="tensorboard/han_voc")
     parser.add_argument("--saved_path", type=str, default="trained_models")
     args = parser.parse_args()
@@ -39,9 +44,9 @@ def get_args():
 
 def train(opt):
     if torch.cuda.is_available():
-        torch.cuda.manual_seed(123)
+        torch.cuda.manual_seed(0)
     else:
-        torch.manual_seed(123)
+        torch.manual_seed(0)
     output_file = open(opt.saved_path + os.sep + "logs.txt", "w")
     output_file.write("Model's parameters: {}".format(vars(opt)))
     training_params = {"batch_size": opt.batch_size,
@@ -51,15 +56,16 @@ def train(opt):
                    "shuffle": False,
                    "drop_last": False}
 
-    max_word_length, max_sent_length = get_max_lengths(opt.train_set)
-    training_set = MyDataset(opt.train_set, opt.word2vec_path, max_sent_length, max_word_length)
+    train_idx, test_idx, label2idx = k_fold_split(opt.data_set)
+    training_set = MyDataset(opt.data_set, opt.bert_path,
+                             train_idx[0], label2idx)
     training_generator = DataLoader(training_set, **training_params)
-    test_set = MyDataset(opt.test_set, opt.word2vec_path, max_sent_length, max_word_length)
+    test_set = MyDataset(opt.data_set, opt.bert_path,
+                         test_idx[0], label2idx)
     test_generator = DataLoader(test_set, **test_params)
 
-    model = HierAttNet(opt.word_hidden_size, opt.sent_hidden_size, opt.batch_size, training_set.num_classes,
-                       opt.word2vec_path, max_sent_length, max_word_length)
-
+    model = BertHierAttNet(opt.bert_size, opt.word_hidden_size, opt.sent_hidden_size,
+                           len(label2idx), opt.bert_path)
 
     if os.path.isdir(opt.log_path):
         shutil.rmtree(opt.log_path)
@@ -77,13 +83,13 @@ def train(opt):
     model.train()
     num_iter_per_epoch = len(training_generator)
     for epoch in range(opt.num_epoches):
-        for iter, (feature, label) in enumerate(training_generator):
+        for i, (x, mask, label, id) in enumerate(training_generator):
             if torch.cuda.is_available():
-                feature = feature.cuda()
-                label = label.cuda()
+                x = x.cuda()  # [batch, seq_num, seq_len]
+                mask = mask.cuda()  # [batch, seq_num, seq_len]
+                label = label.cuda()  # [batch]
             optimizer.zero_grad()
-            model._init_hidden_state()
-            predictions = model(feature)
+            predictions = model(x, mask)
             loss = criterion(predictions, label)
             loss.backward()
             optimizer.step()
@@ -91,12 +97,12 @@ def train(opt):
             print("Epoch: {}/{}, Iteration: {}/{}, Lr: {}, Loss: {}, Accuracy: {}".format(
                 epoch + 1,
                 opt.num_epoches,
-                iter + 1,
+                i + 1,
                 num_iter_per_epoch,
                 optimizer.param_groups[0]['lr'],
                 loss, training_metrics["accuracy"]))
-            writer.add_scalar('Train/Loss', loss, epoch * num_iter_per_epoch + iter)
-            writer.add_scalar('Train/Accuracy', training_metrics["accuracy"], epoch * num_iter_per_epoch + iter)
+            writer.add_scalar('Train/Loss', loss, epoch * num_iter_per_epoch + i)
+            writer.add_scalar('Train/Accuracy', training_metrics["accuracy"], epoch * num_iter_per_epoch + i)
         if epoch % opt.test_interval == 0:
             model.eval()
             loss_ls = []
