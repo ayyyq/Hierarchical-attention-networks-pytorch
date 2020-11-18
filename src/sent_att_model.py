@@ -35,7 +35,7 @@ class SentAttNet(nn.Module):
             mask = mask.unsqueeze(1)
             attn = attn.masked_fill(mask == 0, -1e9)
         attn = F.softmax(attn, dim=-1)
-        attn = torch.tanh(torch.matmul(attn, x))
+        attn = torch.tanh(torch.matmul(attn, x)).squeeze()
 
         out = self.fc(attn)
         return out
