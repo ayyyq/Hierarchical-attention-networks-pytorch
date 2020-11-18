@@ -8,6 +8,9 @@ import csv
 from nltk.tokenize import sent_tokenize, word_tokenize
 from sklearn import metrics
 import numpy as np
+from sklearn.model_selection import StratifiedKFold
+import xml.etree.ElementTree as ET
+
 
 def get_evaluation(y_true, y_prob, list_metrics):
     y_pred = np.argmax(y_prob, -1)
@@ -23,6 +26,7 @@ def get_evaluation(y_true, y_prob, list_metrics):
         output['confusion_matrix'] = str(metrics.confusion_matrix(y_true, y_pred))
     return output
 
+
 def matrix_mul(input, weight, bias=False):
     feature_list = []
     for feature in input:
@@ -34,6 +38,7 @@ def matrix_mul(input, weight, bias=False):
 
     return torch.cat(feature_list, 0).squeeze()
 
+
 def element_wise_mul(input1, input2):
 
     feature_list = []
@@ -44,6 +49,7 @@ def element_wise_mul(input1, input2):
     output = torch.cat(feature_list, 0)
 
     return torch.sum(output, 0).unsqueeze(0)
+
 
 def get_max_lengths(data_path):
     word_length_list = []
@@ -67,10 +73,34 @@ def get_max_lengths(data_path):
 
     return sorted_word_length[int(0.8*len(sorted_word_length))], sorted_sent_length[int(0.8*len(sorted_sent_length))]
 
+
+def k_fold_split(data_path):
+    # 划分训练集和测试集
+    train_idx, test_idx = [], []
+    labels = []
+    label2idx = {}
+
+    tree = ET.parse(data_path)
+    root = tree.getroot()
+    for document_set in root:
+        for document in document_set:
+            # label
+            label = document.attrib['document_level_value']
+            if label not in label2idx:
+                label2idx[label] = len(label2idx)
+            labels.append(label2idx[label])
+
+    skf = StratifiedKFold(n_splits=10, random_state=0, shuffle=True)
+    for train, test in skf.split(np.zeros(len(labels)), labels):
+        train_idx.append(train)
+        test_idx.append(test)
+    return train_idx, test_idx, label2idx
+
+
 if __name__ == "__main__":
-    word, sent = get_max_lengths("../data/test.csv")
-    print (word)
-    print (sent)
+    train_idx, test_idx, label2idx = k_fold_split("../data/dlef_corpus/english.xml")
+    for train in train_idx:
+        print(train.shape)
 
 
 
