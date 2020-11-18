@@ -38,9 +38,9 @@ class BertHierAttNet(nn.Module):
             s = self.linear(s)  # [batch, seq_len, word_hidden_size]
             s = self.word_att_net(s, m)
             seq_list.append(s)
-        s = torch.cat(seq_list, dim=0)  # [seq_num, batch, word_hidden_size]
+        s = torch.stack(seq_list, dim=0)  # [seq_num, batch, word_hidden_size]
         s = s.transpose(0, 1)  # [batch, seq_num, word_hidden_size]
-        mask = mask[:, :, 0].transpose(0, 1)  # [batch, seq_num]
-        out = self.sent_att_net(s, mask)
+        mask = mask.transpose(0, 1)  # [batch, seq_num, seq_len]
+        out = self.sent_att_net(s, mask[:, :, 0])
 
         return out
