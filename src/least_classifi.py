@@ -87,13 +87,12 @@ class review(torch.utils.data.Dataset):
                 # text
                 doc = ''
                 for sentence in document:
-                    if sentence.text == '-EOP- .':
-                        continue
-                    sent = ''
-                    for text in sentence.itertext():
-                        sent += text
-                    sent = sent.replace('-EOP- ', '').lower()
-                    doc += sent + ' '
+                    if len(sentence) > 0:
+                        sent = ''
+                        for text in sentence.itertext():
+                            sent += text
+                        sent = sent.replace('-EOP- ', '').lower()
+                        doc += sent + ' '
 
                 texts.append(doc.strip())
         return texts, labels, ids
@@ -108,7 +107,7 @@ class review(torch.utils.data.Dataset):
 def get_train_args():
     parser=argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=16, help = '每批数据的数量')
-    parser.add_argument('--nepoch', type=int, default=50, help = '训练的轮次')
+    parser.add_argument('--nepoch', type=int, default=100, help = '训练的轮次')
     parser.add_argument('--lr', type=float, default=1e-6, help = '学习率')
     parser.add_argument('--gpu', type=bool, default=True, help = '是否使用gpu')
     parser.add_argument('--num_workers', type=int, default=2, help='dataloader使用的线程数量')
