@@ -107,14 +107,14 @@ class review(torch.utils.data.Dataset):
 
 def get_train_args():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--batch_size', type=int, default=32, help = '每批数据的数量')
-    parser.add_argument('--nepoch', type=int, default=100, help = '训练的轮次')
-    parser.add_argument('--lr', type=float, default=0.5e-4, help = '学习率')
+    parser.add_argument('--batch_size', type=int, default=16, help = '每批数据的数量')
+    parser.add_argument('--nepoch', type=int, default=50, help = '训练的轮次')
+    parser.add_argument('--lr', type=float, default=1e-6, help = '学习率')
     parser.add_argument('--gpu', type=bool, default=True, help = '是否使用gpu')
     parser.add_argument('--num_workers', type=int, default=2, help='dataloader使用的线程数量')
-    parser.add_argument('--data_path', type=str, default='../data/dlef_corpus/english.xml', help='数据路径')
+    parser.add_argument('--data_path', type=str, default='../../data/dlef_corpus/english.xml', help='数据路径')
 
-    parser.add_argument('--bert_path', type=str, default="../data/bert-base-uncased")
+    parser.add_argument('--bert_path', type=str, default="bert-base-uncased")
     parser.add_argument('--output_path', type=str, default="output.txt")
     parser.add_argument('--model_path', type=str, default="../trained_models/model.pt")
 
@@ -144,36 +144,29 @@ def get_data(opt, train_idx, test_idx, label2idx):
     return trainloader, testloader
 
 
-def train(epoch, model, trainloader, testloader, optimizer, opt, max_f1):
-    print('\ntrain-Epoch: %d' % (epoch + 1))
+def train(model, trainloader, optimizer, opt):
     model.train()
-    start_time = time.time()
-    print_step = int(len(trainloader) / 10)
+    # start_time = time.time()
+
+    loss_list = []
     for batch_idx, (data, attention, label, _) in enumerate(trainloader):
         if opt.gpu:
             data = data.cuda()
             attention = attention.cuda()
             label = label.cuda()
+
         optimizer.zero_grad()
+
         logit = model(data, attention)
-        loss = nn.functional.cross_entropy(logit , label)
+        loss = nn.functional.cross_entropy(logit, label)
+
         loss.backward()
         optimizer.step()
-        if batch_idx % print_step == 0:
-            acc, f1_micro, f1_macro = test(model, testloader, opt)
-            print("Epoch:%d [%d|%d] loss:%f Acc:%.3f F1_micro:%.3f F1_macri:%.3f" % (epoch + 1, batch_idx, len(trainloader),
-                                                                                     loss.mean(), acc, f1_micro,
-                                                                                     f1_macro))
-            if f1_micro + f1_macro > max_f1:
-                max_f1 = f1_micro + f1_macro
-                torch.save({
-                    'epoch': batch_idx,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict()
-                }, opt.model_path)
-    print("time:%.3f" % (time.time() - start_time))
-    return max_f1
 
+        loss_list.append(loss.item())
+
+    # print("time:%.3f" % (time.time() - start_time))
+    return np.mean(loss_list)
 
 def test(model, testloader, opt, wr=False):
     f = open(opt.output_path, 'w')
@@ -194,7 +187,7 @@ def test(model, testloader, opt, wr=False):
             total += data.size(0)
             correct += predicted.data.eq(label.data).cpu().sum()
             y_true += label.cpu().data.numpy().tolist()
-            y_pred += predicted.data.numpy().tolist()
+            y_pred += predicted.cpu().data.numpy().tolist()
 
             if wr:
                 batch = label.shape[0]
@@ -202,8 +195,8 @@ def test(model, testloader, opt, wr=False):
                     f.write(id[i] + "\t" + str(label[i].item()) + "\t" + str(predicted[i].item()) + "\n")
 
     acc = (1.0 * correct.numpy()) / total
-    f1_micro = f1_score(y_true, y_pred, average='micro')
-    f1_macro = f1_score(y_true, y_pred, average='macro')
+    f1_micro = f1_score(y_true, y_pred, labels=[0, 1, 2], average='micro')
+    f1_macro = f1_score(y_true, y_pred, labels=[0, 1, 2], average='macro')
     if wr:
         f.write("acc: " + str(acc) + "\n")
         f.write("f1_micro: " + str(f1_micro) + "\n")
@@ -224,9 +217,19 @@ if __name__=='__main__':
 
     max_f1 = 0
     for epoch in range(opt.nepoch):
-        max_f1 = train(epoch, model, trainloader, testloader, optimizer, opt, max_f1)
+        loss = train(model, trainloader, optimizer, opt)
+        acc, f1_micro, f1_macro = test(model, testloader, opt)
+        print("Epoch:%d loss:%f Acc:%.3f F1_micro:%.3f F1_macro:%.3f" % (epoch, loss,
+                                                                         acc, f1_micro, f1_macro))
+        if f1_micro + f1_macro > max_f1:
+            max_f1 = f1_micro + f1_macro
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict()
+            }, opt.model_path)
 
     checkpoint = torch.load(opt.model_path)
     model.load_state_dict(checkpoint['model_state_dict'])
     acc, f1_micro, f1_macro = test(model, testloader, opt, wr=True)
-    print("Epoch:%d Acc:%.3f F1_micro:%.3f F1_macro:%.3f" % (checkpoint['epoch'] + 1, acc, f1_micro, f1_macro))
+    print("Epoch:%d Acc:%.3f F1_micro:%.3f F1_macro:%.3f" % (checkpoint['epoch'], acc, f1_micro, f1_macro))
