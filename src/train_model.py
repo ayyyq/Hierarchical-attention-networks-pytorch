@@ -9,6 +9,8 @@ import numpy as np
 import xml.etree.ElementTree as ET
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import f1_score
+from src.dataset import MyDataset
+from src.model import BertHierAttNet
 os.environ["CUDA_VISIBLE_DEVICES"] = '2,3'
 
 
@@ -106,7 +108,7 @@ class review(torch.utils.data.Dataset):
 
 def get_train_args():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--batch_size', type=int, default=16, help = '每批数据的数量')
+    parser.add_argument('--batch_size', type=int, default=1, help = '每批数据的数量')
     parser.add_argument('--nepoch', type=int, default=50, help = '训练的轮次')
     parser.add_argument('--lr', type=float, default=1e-5, help = '学习率')
     parser.add_argument('--gpu', type=bool, default=True, help = '是否使用gpu')
@@ -206,14 +208,20 @@ def test(model, testloader, opt, wr=False):
 
 if __name__=='__main__':
     opt = get_train_args()
-    if torch.cuda.is_available():
+    if opt.gpu:
         torch.cuda.manual_seed(0)
     else:
         torch.manual_seed(0)
 
     train_idx, test_idx, label2idx = k_fold_split(opt.data_path)
-    trainloader, testloader = get_data(opt, train_idx[0], test_idx[0], label2idx)
-    model = sentiment(len(label2idx))
+    trainset = MyDataset(opt.data_path, opt.bert_path, train_idx[0], label2idx)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=opt.batch_size, shuffle=True,
+                                              num_workers=opt.num_workers)
+    testset = MyDataset(opt.data_path, opt.bert_path, test_idx[0], label2idx)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=50, shuffle=False,
+                                             num_workers=opt.num_workers)
+
+    model = BertHierAttNet(len(label2idx), opt.bert_path)
     if opt.gpu:
         model = nn.DataParallel(model)
         model.cuda()
